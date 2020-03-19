@@ -57,7 +57,6 @@ class UnicornFile():
 
 
 def main():
-    filepath = "input\\03Feb2020 Leviathan E Product Cycle 1.zip"
     unicorn_file = UnicornFile(filepath)
     unicorn_file.load()
     unicorn_file.getLogbook()
@@ -68,29 +67,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-# def main(input_folder, output_folder):
-#     filepath = "input\\03Feb2020 Leviathan E Product Cycle 51.zip"
-
-#     if output_folder not in os.listdir(os.getcwd()):
-#         os.mkdir(output_folder)
-
-#     with open("output.csv", "w") as ofile:
-#         ofile.write("File, Cycle, Method Start, Method End, CIP Pause Start, CIP Pause End, Sanitization Pause Start, Sanitization Pause End, Load Volume (L)\n")
-#         file_list = os.listdir(os.getcwd() + "\\" + input_folder)
-#         for file in file_list:
-#             print("Working on file:", file,)
-#             if file[-4:] != ".zip":
-#                 continue
-#             xml_tree = getFileData(os.getcwd() + "\\" + input_folder + "\\" + file)
-#             try:
-#                 cycle_num = file[file.index("Cycle") + 6:-4]
-#             except ValueError:
-#                 print("No Cycle Number")
-#                 cycle_num = "N/A"
-
-#             # print(cycle_num)
-#             ofile.write(file + "," + cycle_num + "," + getData(xml_tree) + "\n")
-#             print("finished")
-
-# if __name__ == '__main__':
-#     main("input1", "output")
