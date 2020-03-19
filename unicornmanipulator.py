@@ -13,9 +13,13 @@ class UnicornFile():
         self.pycorn_file = None
         self.chrom_1_tree = None
         self.logbook = None
+        self.blocks = None
 
     def load(self):
         self.getFileData()
+        self.getLogbook()
+        self.getBlocks()
+        self.getAvailableCurves()
 
     def getFileData(self):
         # uses pycorn to extract the Chrom.1.Xml data
@@ -30,16 +34,24 @@ class UnicornFile():
         if self.logbook is None:
             self.getLogbook()
 
-        block_pairs = []
+        blocks_dict = {}
         block_stack = collections.deque()
 
         for element in self.logbook:
             if element.attrib["EventSubType"] == "BlockStart":
                 block_stack.append(element)
+                # text = element.find("EventText").text
+                # print(getFollowingWord(text, "Phase", "(Issued)").strip())
             elif element.attrib["EventSubType"] == "BlockEnd":
-                block_pairs.append((block_stack.pop(), element))
+                start = block_stack.pop()
+                phase_name = getFollowingWord(start.find("EventText").text, "Phase", "(Issued)").strip()
+                if phase_name == "":
+                    # for the start, where there is no phase in the text
+                    phase_name = "Method"
+                blocks_dict[phase_name] = (start, element)
 
-        return block_pairs
+        self.blocks = blocks_dict
+        return blocks_dict
 
     def getLogbook(self):
         self.logbook = self.chrom_1_tree.findall("EventCurves/EventCurve[@EventCurveType='Logbook']/Events/Event")
@@ -53,16 +65,36 @@ class UnicornFile():
         curve_dict = {}
         for curve in curves:
             curve_dict[curve.find("Name").text] = (curve.find("CurvePoints/CurvePoint/BinaryCurvePointsFileName").text, curve)
+        self.curves_and_files = curve_dict
         return curve_dict
 
 
+def getFollowingWord(string, keyword, end=" "):
+    # returns the string following the keyword and ending at the end word
+    # without the end parameter, will just get the word only
+    if keyword not in string:
+        return ""
+
+    start_i = string.index(keyword) + len(keyword)
+    end_i = len(string) - 1
+    if end in string:
+        end_i = string[start_i:].index(end) + start_i
+
+    return string[start_i:end_i].replace(".", "")
+
+
+def getFiles():
+    input_folder = os.path.dirname(os.path.dirname(__file__)) + "\\unicorn-manipulator-data\\input"
+    input_files = os.listdir(input_folder)
+    return [input_folder + "\\" + i for i in input_files]
+
+
 def main():
-    unicorn_file = UnicornFile(filepath)
+    input_files = getFiles()
+    # print(input_files)
+    unicorn_file = UnicornFile(input_files[0])
     unicorn_file.load()
-    unicorn_file.getLogbook()
-    blocks = unicorn_file.getBlocks()
-    # [print(x[0][0].text, x[1][0].text, x[0][2].text) for x in blocks]
-    print(unicorn_file.getAvailableCurves())
+    print(unicorn_file.blocks.keys())
 
 
 if __name__ == '__main__':
