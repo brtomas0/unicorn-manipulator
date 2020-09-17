@@ -3,11 +3,10 @@ import pycorn
 import xml.etree.ElementTree as ET
 import collections
 import numpy
-import appJar
 
 '''
 TODO:
-    Figure out how to convert x-axis / extract data from the files
+
 '''
 
 
@@ -16,13 +15,13 @@ class UnicornFile():
 
     def __init__(self, zip_file_path):
         self.zip_file_path = zip_file_path
-        self.file_name = zip_file_path.split("\\")[-1][:-4] # to remove .zip
+        self.filename = zip_file_path.split("\\")[-1][:-4] # to remove .zip
         self.loaded = False
         self.pycorn_file = None
         self.chrom_1_xml = None
         self.logbook = None
         self.blocks = None
-        self.curve_names = None
+        self.curve_data = None
         self.col_xml = None
         self.col_bh = None
         self.col_id = None
@@ -95,18 +94,18 @@ class UnicornFile():
         curve_dict = {}
         for curve in curves:
             curve_dict[curve.find("Name").text] = [curve.find("CurvePoints/CurvePoint/BinaryCurvePointsFileName").text, curve, []]
-        self.curve_names = curve_dict
-        return self.curve_names
+        self.curve_data = curve_dict
+        return self.curve_data
 
     def getCurveData(self, curve_name, x_unit='mL', resize=None):
         # {curvename: [filename, curve_element, [x-data, y-data]]}
-        # resturns the [x-data, y-data] and also stores it in the self.curve_names dict
+        # resturns the [x-data, y-data] and also stores it in the self.curve_data dict
 
-        if self.curve_names is None:
+        if self.curve_data is None:
             self.getAvailableCurves()
-        elif curve_name not in self.curve_names:
+        elif curve_name not in self.curve_data:
             print(curve_name + " is not a valid curve. please choose from:")
-            for name in self.curve_names:
+            for name in self.curve_data:
                 print("\t" + name)
             return None
 
@@ -115,31 +114,31 @@ class UnicornFile():
             x_unit = 'mL'
 
         if x_unit == 'mL':
-            x_values = self.pycorn_file[self.curve_names[curve_name][0]]["CoordinateData.Volumes"]
+            x_values = self.pycorn_file[self.curve_data[curve_name][0]]["CoordinateData.Volumes"]
 
         elif x_unit == 'CV':
-            temp = self.pycorn_file[self.curve_names[curve_name][0]]["CoordinateData.Volumes"]
+            temp = self.pycorn_file[self.curve_data[curve_name][0]]["CoordinateData.Volumes"]
             x_values = [x / self.col_cv for x in temp]
 
         elif x_unit == "min":
-            print(self.pycorn_file[self.curve_names[curve_name][0]].keys())
-            x_values = self.pycorn_file[self.curve_names[curve_name][0]]["CoordinateData.Times"]
+            print(self.pycorn_file[self.curve_data[curve_name][0]].keys())
+            x_values = self.pycorn_file[self.curve_data[curve_name][0]]["CoordinateData.Times"]
 
         else:
             print('This should never happen')
             raise SystemError
 
-        y_values = self.pycorn_file[self.curve_names[curve_name][0]]["CoordinateData.Amplitudes"]
+        y_values = self.pycorn_file[self.curve_data[curve_name][0]]["CoordinateData.Amplitudes"]
 
         if resize is None:
-            self.curve_names[curve_name][2] = [x_values, y_values]
-            return self.curve_names[curve_name][2]
+            self.curve_data[curve_name][2] = [x_values, y_values]
+            return self.curve_data[curve_name][2]
         else:
             resize = int(resize)
             y_values = resizeArr(y_values, resize)
             x_values = numpy.linspace(x_values[0], x_values[-1], resize)
-            self.curve_names[curve_name][2] = [x_values, y_values]
-            return self.curve_names[curve_name][2]
+            self.curve_data[curve_name][2] = [x_values, y_values]
+            return self.curve_data[curve_name][2]
 
     def exportCurves(self, curve_list, output_file, resize=None, x_unit='mL'):
         # takes the list of curves to export, name of export file, the risizing amount, and the units to have
@@ -170,6 +169,73 @@ class UnicornFile():
                         comments="",
                         fmt='%.4f')
 
+    def getBlockCurveData(self, block, curve_name, x_unit='mL', resize=None):
+        xdata, ydata = self.getCurveData(curve_name, x_unit)
+        block_start = float(self.blocks[block][0].find("EventVolume").text)
+        block_end = float(self.blocks[block][1].find("EventVolume").text)
+        print(block_start, block_end)
+
+        # Might be able to speed up since x-axis is evenly distributed.
+        # divide the difference between the last and first value by the number of points
+        # and use that to determine indicies where the start and end value would be located
+        block_indices = [None, None]
+        for i in range(len(xdata)):
+            if xdata[i] >= block_start and block_indices[0] is None:
+                block_indices[0] = i
+            elif xdata[i] >= block_end:
+                block_indices[1] = i
+                break
+        xdata = xdata[block_indices[0]:block_indices[1]]
+        ydata = ydata[block_indices[0]:block_indices[1]]
+        if resize is not None:
+            xdata = resizeArr(xdata, resize)
+            ydata = resizeArr(ydata, resize)
+        return xdata, ydata
+
+    def exportBlockCurves(self, block, curve_list, output_file, resize=None, x_unit='mL'):
+        # takes the list of curves to export, name of export file, the risizing amount, and the units to have
+        # the x data in, and exports it to the output file, aligned to the x_axis
+        curve_data = []
+        header_string = ""
+        for curve_name in curve_list:
+            x_values, y_values = self.getBlockCurveData(block, curve_name, resize=resize, x_unit=x_unit)
+
+            if curve_data == []:
+                header_string += "x-values(%s)" % x_unit
+                curve_data.append(x_values)
+            elif len(x_values) < len(curve_data[0]) and resize is None:
+                # check to see if the newly added data has fewer points. If yes, set that as the new x-axis
+                # and downsize all the y-data for the various curves
+                curve_data[0] = x_values
+                for i in range(1, len(curve_data)):
+                    curve_data[i] = resizeArr(curve_data[i], len(x_values))
+
+            header_string += "," + curve_name
+            curve_data.append(y_values)
+
+        # print(header_string)
+        numpy.savetxt(  output_file,
+                        numpy.transpose(curve_data),
+                        delimiter=",",
+                        header=header_string,
+                        comments="",
+                        fmt='%.4f')
+
+
+class CurveManager(dict):
+    """docstring for CurveManager"""
+
+    def __init__(self):
+        pass
+
+    def add(self, unicorn_file):
+        self[unicorn_file.filename] = unicorn_file
+
+    def remove(self, unicorn_file):
+        if type(unicorn_file) == str:
+            return self.pop(unicorn_file)
+        elif type(unicorn_file) == UnicornFile:
+            return self.pop(unicorn_file.filename)
 
 ####################################################################################################################
 ####################################################################################################################
@@ -215,60 +281,27 @@ def resizeArr(arr, size):
     return [arr[int(i * step)] for i in range(size)]
 
 
-def resizeXCoord(x_data, size):
-    # Resizes the points accross the range, assumes it is smalles at the beggining of the array
-    # and the largest value is at the end of the array
-    # ie, it makes a distribution even across the range of x_data
-    start, end = x_data[0], x_data[-1]
-    new_array = [(end - start) / size * i for i in range(size)]
-    return new_array
-
-
-def resizeYCoord(xdata1, ydata1, xdata2):
-    i2 = 0
-    ydata2 = []
-    for i1 in range(1, len(xdata1)):
-        if xdata1[i1] == xdata2[i2]:
-            ydata2.append(ydata1[i1])
-            i2 += 1
-        elif xdata1[i1] > xdata2[i2]:
-            if (xdata1[i1] - xdata1[i1 - 1]) == 0:
-                # if the same point is taken twice, just skip
-                continue
-            else:
-                slope = (ydata1[i1] - ydata1[i1 - 1]) / (xdata1[i1] - xdata1[i1 - 1])
-                new_y = ydata1[i1] - slope * (xdata2[i2] - xdata1[i1])
-                ydata2.append(new_y)
-                i2 += 1
-        if i2 >= len(xdata2):
-            break
-    return ydata2
-
-
 def main():
     input_files = getInputFiles()
     # print(input_files)
-    unicorn_file = UnicornFile(input_files[0])
-    unicorn_file.load()
-    unicorn_file.getColumnData()
-    # print(unicorn_file.pycorn_file['Chrom.1_1_True'])
-    keys = unicorn_file.pycorn_file['Chrom.1_1_True'].keys()
-    print(keys)
-    x_data = unicorn_file.pycorn_file['Chrom.1_1_True']['CoordinateData.Volumes']
-    y_data = unicorn_file.pycorn_file['Chrom.1_1_True']['CoordinateData.Amplitudes']
-    # x_coord = resizeXCoord(x_data, 100)
-    # y_coord = resizeYCoord(x_data, y_data, x_coord)
-    # [print(f'{x_coord[i]:.6}, {y_coord[i]:.6}') for i in range(len(x_coord))]
-    x_coord = resizeArr(x_data, 100)
-    # print(len(x_data), len(x_coord))
-    y_coord = resizeArr(y_data, 100)
-    # [print(f'{x_coord[i]:.6}') for i in range(len(x_coord))]
-    [print(f'{x_coord[i]:.6}, {y_coord[i]:.6}') for i in range(len(x_coord))]
+    unicorn_file1 = UnicornFile(input_files[0])
+    unicorn_file2 = UnicornFile(input_files[1])
+    manager = CurveManager()
+    manager.add(unicorn_file1)
+    manager.add(unicorn_file2)
+    print(manager)
+    manager.remove("20200713 Cycle 006 Kiji TD13507 KanCapA Resin Reuse")
+    print(manager)
 
-    # print(unicorn_file.getCurveData("UV 1_280", x_unit="min", resize=100)[0])
-    # print(unicorn_file.pycorn_file.keys())
-    # print(unicorn_file.pycorn_file["ColumnTypeData"]['Xml'])
-    # print(unicorn_file.pycorn_file["ColumnIndividualData"]["Xml"])
+    # unicorn_file.load()
+    # unicorn_file.getColumnData()
+    # # print(unicorn_file.pycorn_file['Chrom.1_1_True'])
+    # keys = unicorn_file.pycorn_file['Chrom.1_1_True'].keys()
+    # print(keys)
+    # x_data = unicorn_file.pycorn_file['Chrom.1_1_True']['CoordinateData.Volumes']
+    # y_data = unicorn_file.pycorn_file['Chrom.1_1_True']['CoordinateData.Amplitudes']
+
+    # unicorn_file.getBlockCurveData('Elution', "UV 1_280")
 
 
 if __name__ == '__main__':

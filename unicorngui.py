@@ -21,48 +21,40 @@ def getOutputFolder(out_folder_name):
     return root_dir + "\\unicorn-manipulator-out\\" + out_folder_name
 
 
-def exportFileCSV(unicorn_file):
-    curve_list = [x for x in app.getAllCheckBoxes() if app.getAllCheckBoxes()[x] is True]
-    out_file_name = output_folder + "\\" + unicorn_file.file_name + ".csv"
-    resize = app.getEntry("resample_size")
-    x_unit = app.getRadioButton("x unit")
-    unicorn_file.exportCurves(curve_list, out_file_name, resize, x_unit)
-    # print(unicorn_file.file_name)
-
-
-def buttonMakeAllCSV():
-    # curve_list = app.getAllListBoxes()["curve_list"]
-    for file in app.getListBox("file_list"):
-        print(file)
-        exportFileCSV(unicornfile_list[file].load())
-
-
 def makeFileBox():
     app.setStretch("both")
     app.addListBox("file_list", [unicornfile_list[x].file_name for x in unicornfile_list])
     # app.setFrameWidth("files",300)
     app.setListBoxWidth("file_list", 50)
     app.setListBoxMulti("file_list", True)
+    app.selectListItemAtPos("file_list", 0)
 
 
-def makeCurveCheckboxes(sample_file):
-    sample_file.load()
-    for curve_name in sample_file.curve_names:
-        app.addCheckBox(curve_name)
+def makeCurveList():
+    file = app.getListBox("file_list")[0]
+    print(file)
+    unicornfile_list[file].load()
+
+    app.addProperties("Curves")
+    for curve_name in unicornfile_list[file].curve_data:
+        app.setProperty("Curves", curve_name)
     # app.addListBox("curve_list", unicorn_file.curves)
     # app.setListBoxMulti("curve_list", True)
 
 
 def makePhaseFrame():
     app.setStretch("column")
+    app.setPadding([15, 5])
     app.addButton("Update Phases", displayPhases)
-
     app.setStretch("column")
-    app.setInPadding([0, 10])
-    app.addLabel("PL1", "Phases in all methods:")
-    app.addListBox("similar phases")
-    app.addLabel("PL2", "Phases not in all methods:")
-    app.addListBox("different phases")
+    # app.addLabel("PL1", "Phases in all methods:")
+    app.addProperties("Phases in all methods")
+    # app.addLabel("PL2", "Phases not in all methods:")
+    app.addProperties("Phases not in all methods")
+    app.setProperty("Phases not in all methods", "tempt")
+    displayPhases()
+    app.addButton("Select all Phases", selectPhases)
+    app.addButton("Deselect all Phases", deselectPhases)
 
 
 def getUnicornFiles():
@@ -97,10 +89,50 @@ def displayPhases():
         # for block in unicornfile_list[file].blocks:
         #     phase_list[block] = None
         #     print(block)
+    clearPhases()
+    app.setProperties("Phases in all methods", {x: True for x in ordered_blocks if x in sim_phase_set})
+    app.setProperties("Phases not in all methods", {x: True for x in dif_phase_set})
+    # app.updateListBox("Phases in all methods", phase_list.keys())
 
-    app.updateListBox("similar phases", [x for x in ordered_blocks if x in sim_phase_set])
-    app.updateListBox("different phases", dif_phase_set)
-    # app.updateListBox("similar phases", phase_list.keys())
+
+def clearPhases():
+    for prop in app.getProperties("Phases in all methods"):
+        app.deleteProperty("Phases in all methods", prop)
+    for prop in app.getProperties("Phases not in all methods"):
+        app.deleteProperty("Phases not in all methods", prop)
+
+
+def selectPhases():
+    app.resetProperties("Phases in all methods")
+    app.resetProperties("Phases not in all methods")
+
+
+def deselectPhases():
+    app.clearProperties("Phases in all methods")
+    app.clearProperties("Phases not in all methods")
+
+
+def exportFileCSV(unicorn_file):
+    # curve_list = [x for x in app.getAllCheckBoxes() if app.getAllCheckBoxes()[x] is True]
+    curve_list = [x for x in app.getProperties("Curves") if app.getProperties("Curves")[x]]
+    out_file_name = output_folder + "\\" + unicorn_file.file_name + ".csv"
+    resize = app.getEntry("resample_size")
+    x_unit = app.getRadioButton("x unit")
+    selected_phases = [x for x in app.properties("Phases in all methods") if app.properties("Phases in all methods")[x]]
+    if len(selected_phases) == len(app.properties("Phases in all methods")):
+        unicorn_file.exportCurves(curve_list, out_file_name, resize, x_unit)
+    elif len(selected_phases) == 1:
+        unicorn_file.exportBlockCurves(selected_phases[0], curve_list, out_file_name, resize, x_unit)
+    else:
+        print("Function not supported")
+    # print(unicorn_file.file_name)
+
+
+def buttonMakeAllCSV():
+    # curve_list = app.getAllListBoxes()["curve_list"]
+    for file in app.getListBox("file_list"):
+        print(file)
+        exportFileCSV(unicornfile_list[file].load())
 
 
 def main():
@@ -119,10 +151,11 @@ def main():
 
     app.startFrame("phases", row=0, column=1)
     makePhaseFrame()
+    # app.addButton("clear properties box", clearPhases)
     app.stopFrame()
 
     app.startFrame("curves", row=0, column=2)
-    makeCurveCheckboxes(next(iter(unicornfile_list.values())))
+    makeCurveList()
     app.stopFrame()
 
     app.startFrame("data_export", row=0, column=3)
