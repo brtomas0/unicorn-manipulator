@@ -23,7 +23,7 @@ def getOutputFolder(out_folder_name):
 
 def makeFileBox():
     app.setStretch("both")
-    app.addListBox("file_list", [unicornfile_list[x].file_name for x in unicornfile_list])
+    app.addListBox("file_list", [unicornfile_list[x].filename for x in unicornfile_list])
     # app.setFrameWidth("files",300)
     app.setListBoxWidth("file_list", 50)
     app.setListBoxMulti("file_list", True)
@@ -61,8 +61,8 @@ def getUnicornFiles():
     unicornfile_list = {}
     for file in input_files:
         unicorn_file = unicornmanipulator.UnicornFile(file)
-        unicornfile_list[unicorn_file.file_name] = unicorn_file
-        # print(file, unicorn_file.file_name)
+        unicornfile_list[unicorn_file.filename] = unicorn_file
+        # print(file, unicorn_file.filename)
 
     return unicornfile_list
 
@@ -115,17 +115,17 @@ def deselectPhases():
 def exportFileCSV(unicorn_file):
     # curve_list = [x for x in app.getAllCheckBoxes() if app.getAllCheckBoxes()[x] is True]
     curve_list = [x for x in app.getProperties("Curves") if app.getProperties("Curves")[x]]
-    out_file_name = output_folder + "\\" + unicorn_file.file_name + ".csv"
+    out_filename = output_folder + "\\" + unicorn_file.filename + ".csv"
     resize = app.getEntry("resample_size")
     x_unit = app.getRadioButton("x unit")
     selected_phases = [x for x in app.properties("Phases in all methods") if app.properties("Phases in all methods")[x]]
     if len(selected_phases) == len(app.properties("Phases in all methods")):
-        unicorn_file.exportCurves(curve_list, out_file_name, resize, x_unit)
+        unicorn_file.exportCurves(curve_list, out_filename, x_unit, resize)
     elif len(selected_phases) == 1:
-        unicorn_file.exportBlockCurves(selected_phases[0], curve_list, out_file_name, resize, x_unit)
+        unicorn_file.exportBlockCurves(selected_phases[0], curve_list, out_filename, x_unit, resize)
     else:
         print("Function not supported")
-    # print(unicorn_file.file_name)
+    # print(unicorn_file.filename)
 
 
 def buttonMakeAllCSV():
