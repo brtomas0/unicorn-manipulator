@@ -49,11 +49,15 @@ class UnicornFile():
         column_binary = self.pycorn_file["ColumnTypeData"]["Xml"]
         column_data = column_binary.decode("utf-8", "ignore").strip()
         column_data = column_data[column_data.index("<"):]
+        # print(column_data)
         self.col_xml = ET.fromstring(column_data)
 
-        self.col_bh = float(self.col_xml.find("ColumnType/BedHeight").text)
-        self.col_id = float(self.col_xml.find("ColumnType/Hardware/Diameter").text)
-        self.col_cv = float(self.chrom_1_xml.find("Curves/Curve/ColumnVolume").text)
+        try:
+            self.col_bh = float(self.col_xml.find("ColumnType/BedHeight").text)
+            self.col_id = float(self.col_xml.find("ColumnType/Hardware/Diameter").text)
+            self.col_cv = float(self.chrom_1_xml.find("Curves/Curve/ColumnVolume").text)
+        except AttributeError:
+            print("Can't find column information")
         # print(self.col_bh, self.col_id, self.col_cv)
 
     def getBlocks(self):
@@ -150,7 +154,6 @@ class UnicornFile():
                 for i in range(1, len(curve_data)):
                     curve_data[i] = resizeArr(curve_data[i], len(x_values))
 
-            # header_string += "," + curve_name
             curve_data.append(y_values)
             curve_data[0] = [x - curve_data[0][0] for x in curve_data[0]]
 
@@ -161,6 +164,10 @@ class UnicornFile():
         curve_data = self.combineCurves(curve_list, x_unit)
         block_start = float(self.blocks[block][0].find("EventVolume").text)
         block_end = float(self.blocks[block][1].find("EventVolume").text)
+
+        if x_unit == 'CV':
+            block_start = block_start / self.col_cv
+            block_end = block_end / self.col_cv
 
         # Might be able to speed up since x-axis is evenly distributed.
         # divide the difference between the last and first value by the number of points
@@ -251,29 +258,20 @@ class CurveManager(dict):
             else:
                 final_data.append(resizeYCoord(old_xdata, data, x_data))
 
-        header_string = "x-values (mL)," + ",".join([f"{curve}\\{key}" for key in self for curve in curve_list])
-        print(len(final_data), len(header_string))
-        [print(len(x)) for x in final_data]
+        return final_data
 
-        numpy.savetxt(  output_file,
-                        numpy.transpose(final_data),
-                        delimiter=",",
-                        header=header_string,
-                        comments="",
-                        fmt='%s')
-
-    def alignBlockCurves(self, block, curve_list, output_file):
+    def alignBlockCurves(self, block, curve_list, x_unit='mL', resize=None):
         self.loadAllCurves()
         all_data = []
         final_data = []
         for key in self:
-            curve_data = self[key].combineBlockCurves(block, curve_list, x_unit='mL', resize=None)
+            curve_data = self[key].combineBlockCurves(block, curve_list, x_unit, resize)
             all_data += curve_data
 
         # Look for the x axis that goes for the longest, and use that to make a new x-axis
         max_x = max([all_data[i][-1] for i in range(0, len(all_data), len(curve_list) + 1)])
         max_len = max([len(all_data[i]) for i in range(0, len(all_data), len(curve_list) + 1)])
-        print(max_x, max_len)
+
         x_data = [x * max_x / max_len for x in range(0, max_len)]
         final_data.append(x_data)
 
@@ -287,14 +285,36 @@ class CurveManager(dict):
             else:
                 final_data.append(resizeYCoord(old_xdata, data, x_data))
 
-        header_string = "x-values (mL)," + ",".join([f"{curve}\\{key}" for key in self for curve in curve_list])
-        print(len(final_data), len(header_string))
-        [print(len(x)) for x in final_data]
+        return final_data
 
+    def exportBlockCurves(self, block, curve_list, output_file, x_unit='mL', resize=None):
+        # takes the list of curves to export, name of export file, the risizing amount, and the units to have
+        # the x data in, and exports it to the output file, aligned to the x_axis
+        curve_data = self.alignBlockCurves(block, curve_list, x_unit, resize)
+        header_string = "x-values (mL)," + ",".join([f"{curve}\\{key}" for key in self for curve in curve_list])
+
+        self.saveCurves(output_file, curve_data, header_string)
+
+    def exportBlocks(self, block_list, curve_list, output_file, x_unit='mL', resize=None):
+        final_data = []
+        startx = 0
+        open(output_file, "w").close()
+        ofile = open(output_file, "a")
+        header_string = "x-values (mL)," + ",".join([f"{curve}\\{key}" for key in self for curve in curve_list]) + "\n"
+        ofile.write(header_string)
+        for block in block_list:
+            curve_data = self.alignBlockCurves(block, curve_list, x_unit, resize)
+            # add startx to every x value to offset by the previous block, and set the last x value to the next startx
+            curve_data[0] = [x + startx for x in curve_data[0]]
+            startx = curve_data[0][-1]
+            self.saveCurves(ofile, curve_data, header_string)
+        ofile.close()
+
+    def saveCurves(self, output_file, curve_data, header_string):
+        # saves data assuming curve_data format of [x-axis, y-axis1, y-axis2, etc]
         numpy.savetxt(  output_file,
-                        numpy.transpose(final_data),
+                        numpy.transpose(curve_data),
                         delimiter=",",
-                        header=header_string,
                         comments="",
                         fmt='%s')
 
@@ -382,10 +402,6 @@ def resizeArr(arr, size):
     return [arr[int(i * step)] for i in range(size)]
 
 
-def foo():
-    return [1, 2, 3, 4]
-
-
 def main():
     input_files = getInputFiles()
     # print(input_files)
@@ -396,9 +412,14 @@ def main():
     manager.add(unicorn_file1)
     manager.add(unicorn_file2)
     manager.add(unicorn_file3)
-    print(manager)
-    manager.alignBlockCurves("Elution", ["UV 1_280", "pH"], getOutputFolder("test") + "\\test.csv")
-
+    # print(manager)
+    # manager.exportBlockCurves("Elution", ["UV 1_280", "pH"], getOutputFolder("test") + "\\test.csv", "mL", 100)
+    # manager.exportBlocks(["Sample Application", "Column Wash", "Elution"], ["UV 1_280", "pH"], getOutputFolder("test") + "\\test.csv")
+    manager.exportBlocks(["Elution"], ["UV 1_280", "pH"], getOutputFolder("test") + "\\test.csv")
+    # unicorn_file1.load()
+    # data = unicorn_file1.combineBlockCurves("Elution", ["UV 1_280"], x_unit='CV', resize=100)
+    # for i in range(len(data[0])):
+    #     print(f"{data[0][i]},{data[1][i]}")
     # unicorn_file.load()
     # unicorn_file.getColumnData()
     # # print(unicorn_file.pycorn_file['Chrom.1_1_True'])
